@@ -131,6 +131,27 @@ def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int
     return result_df.to_json(orient='records', indent=2)
 
 
+# Internal function to save the data to the database
+def _save_data_to_database(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> None:
+    """Save the data to the database."""
+    print(f"Saving data to the database for action {action} and split year {split_year}")
+    print(data)
+    exit()
+
+
+
+# Define the function to save the data to the database for action 'sum'
+def save_data_to_database_sum(data: Dict[str, Any], split_year: int = 2025) -> None:
+    """Save the data to the database for action 'sum'."""
+    _save_data_to_database(data, 'sum', split_year)
+
+
+# Define the function to save the data to the database for action 'avg'
+def save_data_to_database_avg(data: Dict[str, Any], split_year: int = 2025) -> None:
+    """Save the data to the database for action 'avg'."""
+    _save_data_to_database(data, 'avg', split_year)
+
+
 # Define the async function to run the agent
 async def run_agent(messages, deps, agent):
     # Begin an AgentRun, which is an async-iterable over the nodes of the agent's graph
@@ -163,6 +184,8 @@ if __name__ == "__main__":
                 You are a helpful assistant that has access to a PDF file and can process data using Pandas.
                 Make sure to use the tool 'extract_pdf_text' to extract the text from the PDF file.
                 You can also use 'process_dataframe' to process data using Pandas.
+                You can also use 'save_data_to_database_sum' to save the data to the database for action 'sum'.
+                You can also use 'save_data_to_database_avg' to save the data to the database for action 'avg'.
             """
         )
 
@@ -170,7 +193,9 @@ if __name__ == "__main__":
     messages = [
             "You have tools available if you need to extract the text from the PDF file.",
             "You have tools available if you need to process data using Pandas.",
-            "Extract the text from the PDF file and process the data using Pandas to return the sum of year 2023.",
+            "You have tools available if you need to save the data to the database for action 'sum'.",
+            "You have tools available if you need to save the data to the database for action 'avg'.",
+            "Extract the text from the PDF file and process the data using Pandas to return the sum of year 2023 and save the result to the database."
         ]
 
     # Define the dependencies to send to the agent
@@ -180,7 +205,7 @@ if __name__ == "__main__":
     agent = Agent(
         os.getenv('MISTRAL_MODEL'),  
         api_key=os.getenv('MISTRAL_API_KEY'),
-        tools=[extract_pdf_text, process_dataframe], 
+        tools=[extract_pdf_text, process_dataframe, save_data_to_database_sum, save_data_to_database_avg], 
         system_prompt=system_prompt
     )
 
