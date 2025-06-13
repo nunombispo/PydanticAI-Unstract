@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Dict, Any
 import pandas as pd
@@ -833,9 +834,22 @@ def extract_pdf_text(ctx: RunContext[str]) -> str:
         return "Error extracting text from PDF"
 
 
-def process_dataframe(data: Dict[str, Any]) -> pd.DataFrame:
-    """Process any nested dictionary data using pandas and return a processed DataFrame."""
-    print("Data processing tool called")
+def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> pd.DataFrame:
+    """Process any nested dictionary data using pandas and return a processed DataFrame with aggregated values.
+    
+    Args:
+        data (Dict[str, Any]): The input data dictionary
+        action (str): The aggregation action to perform ('sum' or 'avg')
+        split_year (int): The year to split the data before and after (default: 2025)
+    
+    Returns:
+        str: JSON string containing the aggregated data
+    """
+    print(f"Data processing tool called with action={action}, split_year={split_year}")
+    
+    # Validate action parameter
+    if action not in ['sum', 'avg']:
+        raise ValueError("Action must be either 'sum' or 'avg'")
     
     # Get the data from the context
     raw_data = data
@@ -869,34 +883,41 @@ def process_dataframe(data: Dict[str, Any]) -> pd.DataFrame:
         'Value': values
     })
     
-    # Sort by Category, Metric, and Year
-    df = df.sort_values(['Category', 'Metric', 'Year'])
+    # Create separate DataFrames for before and after split_year
+    df_before = df[df['Year'] < split_year].groupby(['Category', 'Metric'])['Value']
+    df_after = df[df['Year'] >= split_year].groupby(['Category', 'Metric'])['Value']
     
-    # Create a pivot table with proper handling of the index
-    try:
-        df_pivot = pd.pivot_table(
-            data=df,
-            values='Value',
-            index=['Category', 'Metric'],
-            columns='Year',
-            aggfunc='first'  # Use first value if there are duplicates
-        )
-        
-        # Reset index to make Category and Metric regular columns
-        df_pivot = df_pivot.reset_index()
-        
-        # Fill NaN values with 'N/A'
-        df_pivot = df_pivot.fillna('N/A')
-        
-        print("\nProcessed DataFrame Preview:")
-        print(df_pivot.head())
-        
-        # Return a JSON of the DataFrame
-        return df_pivot.to_json()
-    except Exception as e:
-        print(f"Error creating pivot table: {str(e)}")
-        # Return the original DataFrame if pivot fails
-        return df
+    # Apply the specified action
+    if action == 'sum':
+        df_before = df_before.sum().reset_index()
+        df_after = df_after.sum().reset_index()
+        before_col = f'Sum_Before_{split_year}'
+        after_col = f'Sum_After_{split_year}'
+    else:  # action == 'avg'
+        df_before = df_before.mean().reset_index()
+        df_after = df_after.mean().reset_index()
+        before_col = f'Avg_Before_{split_year}'
+        after_col = f'Avg_After_{split_year}'
+    
+    # Rename the Value columns
+    df_before = df_before.rename(columns={'Value': before_col})
+    df_after = df_after.rename(columns={'Value': after_col})
+    
+    # Merge the two DataFrames
+    result_df = pd.merge(df_before, df_after, on=['Category', 'Metric'])
+    
+    # Sort by Category and Metric
+    result_df = result_df.sort_values(['Category', 'Metric'])
+    
+    # Round numeric columns to 2 decimal places
+    numeric_cols = result_df.select_dtypes(include=['float64']).columns
+    result_df[numeric_cols] = result_df[numeric_cols].round(2)
+    
+    print(f"\nSummary of {action.title()} Values Before and After {split_year}:")
+    print(result_df)
+    
+    # Return a JSON of the DataFrame
+    return result_df.to_json(orient='records', indent=2)
 
 
 # Define the async function to run the agent
@@ -934,7 +955,7 @@ if __name__ == "__main__":
     messages = [
             "You have tools available if you need to extract the text from the PDF file.",
             "You have tools available if you need to process data using Pandas.",
-            "Extract the text from the PDF file and process the data using Pandas.",
+            "Extract the text from the PDF file and process the data using Pandas to return the sum of year 2023.",
         ]
 
     # Define the dependencies to send to the agent
