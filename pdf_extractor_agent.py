@@ -6,6 +6,7 @@ from pydantic_ai import Agent, BinaryContent, RunContext
 from pathlib import Path
 import requests
 import asyncio
+import numpy as np
 
 
 # Load the environment variables
@@ -42,19 +43,67 @@ def extract_pdf_text(ctx: RunContext[str]) -> str:
         return "Error extracting text from PDF"
 
 
-# Define the function to process the data using pandas
-def process_dataframe(data: Dict[str, Any]) -> pd.DataFrame:
-    """Process data using pandas and return a processed DataFrame."""
+def flatten_nested_dict(nested_dict, parent_key='', sep='_'):
+    """Flatten a nested dictionary into a list of tuples (key_path, value)."""
+    items = []
+    for key, value in nested_dict.items():
+        new_key = f"{parent_key}{sep}{key}" if parent_key else key
+        
+        if isinstance(value, dict):
+            items.extend(flatten_nested_dict(value, new_key, sep=sep).items())
+        elif isinstance(value, list):
+            # Handle lists of dictionaries
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    items.extend(flatten_nested_dict(item, f"{new_key}_{i}", sep=sep).items())
+                else:
+                    items.append((f"{new_key}_{i}", item))
+        else:
+            items.append((new_key, value))
+    return dict(items)
+
+
+def process_dataframe(ctx: RunContext[Dict[str, Any]]) -> pd.DataFrame:
+    """Process any nested dictionary data using pandas and return a processed DataFrame."""
     print("Data processing tool called")
+    data = ctx.deps.data  # Get data from context
     
-    # Print the data
-    print(data)
-
-    # Convert the input data to a DataFrame
-    df = pd.DataFrame(data)
+    try:
+        # First attempt: try direct DataFrame creation
+        df = pd.DataFrame(data)
+    except ValueError:
+        try:
+            # Second attempt: flatten nested structure and create DataFrame
+            flattened_data = flatten_nested_dict(data)
+            df = pd.DataFrame([flattened_data])
+            
+            # If we have a single row, try to reshape it
+            if len(df) == 1:
+                # Melt the DataFrame to get a long format
+                df = df.melt(var_name='Metric', value_name='Value')
+                
+                # Try to extract year/period from metric names if they exist
+                df['Period'] = df['Metric'].str.extract(r'(\d{4})').fillna('Unknown')
+                df['Metric'] = df['Metric'].str.replace(r'_\d{4}', '', regex=True)
+                
+                # Pivot to get periods as columns if we have period information
+                if not df['Period'].eq('Unknown').all():
+                    df = df.pivot(index='Metric', columns='Period', values='Value').reset_index()
+        
+        except Exception as e:
+            print(f"Error processing data: {str(e)}")
+            # Last resort: create a simple DataFrame with the raw data
+            df = pd.DataFrame({'raw_data': [str(data)]})
     
+    # Basic data cleaning
+    df = df.fillna('N/A')  # Replace NaN values
+    df = df.replace([np.inf, -np.inf], 'N/A')  # Replace infinite values
+    
+    print("\nProcessed DataFrame Preview:")
     print(df.head())
-
+    print("\nDataFrame Info:")
+    print(df.info())
+    
     return df
 
 
