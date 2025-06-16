@@ -46,7 +46,7 @@ def extract_pdf_text(ctx: RunContext[str]) -> str:
         print(e)
         return "Error extracting text from PDF"
 
-
+# Define the function to process the data using Pandas
 def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> str:
     """Process any nested dictionary data using pandas and return a processed DataFrame with aggregated values.
     
@@ -135,7 +135,7 @@ def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int
     # Return a JSON of the DataFrame
     return result_df.to_json(orient='records', indent=2)
 
-
+# Define the function to save the data to the database
 def _save_data_to_database(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> Dict[str, Any]:
     """Save the processed data to the database using direct psycopg2 connection.
     
