@@ -1,6 +1,6 @@
 # PDF Text Extraction and Data Processing Tool
 
-This project implements a PydanticAI agent tool that extracts text from PDF files using Unstract API, processes data using Pandas, and integrates with a PostgreSQL database for data storage and analysis. 
+This project implements a PydanticAI agent tool that extracts text from PDF files using Unstract API, processes data using Pandas, and integrates with a PostgreSQL database for data storage and analysis.
 
 The agent is powered by Mistral's AI model.
 
@@ -52,6 +52,12 @@ pip install -r requirements.txt
 ## Usage
 
 Adjust the `messages` for the desired processing by the AI Agent.
+
+Then execute the script with:
+
+```
+python pdf_extractor_agent.py
+```
 
 ## Database Schema
 
