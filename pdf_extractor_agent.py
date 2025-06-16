@@ -8,7 +8,9 @@ from pydantic_ai import Agent, BinaryContent, RunContext
 from pathlib import Path
 import requests
 import asyncio
-import numpy as np
+import numpy as np  
+import psycopg
+from datetime import datetime, UTC
 
 
 # Load the environment variables
@@ -18,7 +20,7 @@ load_dotenv()
 def extract_pdf_text(ctx: RunContext[str]) -> str:
     """Extract text from PDF binary data."""
     print("extract_pdf_text called")
-    
+
     try:
         # Get the binary data from the context
         pdf_binary = ctx.deps.data
@@ -45,7 +47,7 @@ def extract_pdf_text(ctx: RunContext[str]) -> str:
         return "Error extracting text from PDF"
 
 
-def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> pd.DataFrame:
+def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> str:
     """Process any nested dictionary data using pandas and return a processed DataFrame with aggregated values.
     
     Args:
@@ -54,16 +56,22 @@ def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int
         split_year (int): The year to split the data before and after (default: 2025)
     
     Returns:
-        str: JSON string containing the aggregated data
+        JSON string containing the aggregated data
     """
-    print(f"Data processing tool called with action={action}, split_year={split_year}")
+    print(f"process_dataframe called with action={action}, split_year={split_year}")
     
     # Validate action parameter
     if action not in ['sum', 'avg']:
         raise ValueError("Action must be either 'sum' or 'avg'")
     
-    # Get the data from the context
-    raw_data = data
+    # Parse JSON if data is a string
+    if isinstance(data, str):
+        try:
+            raw_data = json.loads(data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON string: {e}")
+    else:
+        raw_data = data
     
     # Initialize lists to store the data
     metrics = []
@@ -124,21 +132,126 @@ def process_dataframe(data: Dict[str, Any], action: str = 'sum', split_year: int
     numeric_cols = result_df.select_dtypes(include=['float64']).columns
     result_df[numeric_cols] = result_df[numeric_cols].round(2)
     
-    print(f"\nSummary of {action.title()} Values Before and After {split_year}:")
-    print(result_df)
-    
     # Return a JSON of the DataFrame
     return result_df.to_json(orient='records', indent=2)
 
 
-# Internal function to save the data to the database
-def _save_data_to_database(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> None:
-    """Save the data to the database."""
-    print(f"Saving data to the database for action {action} and split year {split_year}")
-    print(data)
-    exit()
+def _save_data_to_database(data: Dict[str, Any], action: str = 'sum', split_year: int = 2025) -> Dict[str, Any]:
+    """Save the processed data to the database using direct psycopg2 connection.
+    
+    Args:
+        data (Dict[str, Any]): The processed data to save
+        action (str): The aggregation action ('sum' or 'avg')
+        split_year (int): The year used for splitting the data
+        
+    Returns:
+        Dict[str, Any]: Result of the database operation including status and inserted records
+    """
+    print("save_data_to_database called")
+    try:
+        # Parse JSON if data is a string
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string: {e}")
 
-
+        # Get the connection string from the environment variable
+        connection_string = os.getenv('NEON_DATABASE_URL')
+        
+        with psycopg.connect(connection_string) as conn:
+            # Open a cursor to perform database operations
+            with conn.cursor() as cur:
+                # Create tables if they don't exist
+                if action == 'sum':
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS economic_report_sum (
+                            id SERIAL PRIMARY KEY,
+                            category VARCHAR NOT NULL,
+                            metric VARCHAR NOT NULL,
+                            sum_before FLOAT NOT NULL,
+                            sum_after FLOAT NOT NULL,
+                            split_year INTEGER NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                else:  # action == 'avg'
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS economic_report_avg (
+                            id SERIAL PRIMARY KEY,
+                            category VARCHAR NOT NULL,
+                            metric VARCHAR NOT NULL,
+                            avg_before FLOAT NOT NULL,
+                            avg_after FLOAT NOT NULL,
+                            split_year INTEGER NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+        
+                # Prepare data for insertion
+                records_inserted = 0
+                for record in data['records']:
+                    if action == 'sum':
+                        category = record['Category']
+                        metric = record['Metric']
+                        sum_before = record[f'{action.title()}_Before_{split_year}']
+                        sum_after = record[f'{action.title()}_After_{split_year}']
+                        created_at = datetime.now(UTC)
+                        
+                        insert_query = """
+                            INSERT INTO economic_report_sum 
+                            (category, metric, sum_before, sum_after, split_year, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """
+                        cur.execute(insert_query, (category, metric, sum_before, sum_after, split_year, created_at))
+                    else:  # action == 'avg'
+                        category = record['Category']
+                        metric = record['Metric']
+                        avg_before = record[f'{action.title()}_Before_{split_year}']
+                        avg_after = record[f'{action.title()}_After_{split_year}']
+                        created_at = datetime.now(UTC)
+                        
+                        insert_query = """
+                            INSERT INTO economic_report_avg 
+                            (category, metric, avg_before, avg_after, split_year, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """
+                        cur.execute(insert_query, (category, metric, avg_before, avg_after, split_year, created_at))
+                    
+                    # Increment the number of records inserted
+                    records_inserted += 1
+                    
+                # Commit the transaction
+                conn.commit()
+                
+                # Prepare result
+                result = {
+                    'status': 'success',
+                    'action': action,
+                    'split_year': split_year,
+                    'records_inserted': records_inserted,
+                    'timestamp': datetime.now(UTC).isoformat()
+                }
+                
+                return result
+        
+    except Exception as e:
+        # Rollback in case of error
+        if 'conn' in locals() and conn is not None:
+            conn.rollback()
+        return {
+            'status': 'error',
+            'error': str(e),
+            'action': action,
+            'split_year': split_year,
+            'timestamp': datetime.now(UTC).isoformat()
+        }
+    finally:
+        # Close the cursor and connection if they exist
+        if 'cur' in locals() and cur is not None:
+            cur.close()
+        if 'conn' in locals() and conn is not None:
+            conn.close()
 
 # Define the function to save the data to the database for action 'sum'
 def save_data_to_database_sum(data: Dict[str, Any], split_year: int = 2025) -> None:
@@ -195,7 +308,8 @@ if __name__ == "__main__":
             "You have tools available if you need to process data using Pandas.",
             "You have tools available if you need to save the data to the database for action 'sum'.",
             "You have tools available if you need to save the data to the database for action 'avg'.",
-            "Extract the text from the PDF file and process the data using Pandas to return the sum of year 2023 and save the result to the database."
+            "Extract the text from the PDF file and process the data using Pandas to return the average of year 2025 and save the result to the database (make sure to pass a list with records).",
+            "Return the result in a JSON format."
         ]
 
     # Define the dependencies to send to the agent

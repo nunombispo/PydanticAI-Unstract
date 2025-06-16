@@ -1,7 +1,6 @@
 pydantic
 pydantic-ai
-pypdf
 requests
 python-dotenv
 pandas
-llmwhisperer-client
+psycopg[binary,pool]
